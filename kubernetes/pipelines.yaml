@@ -1,0 +1,192 @@
+---
+apiVersion: tekton.dev/v1beta1
+kind: ClusterTask
+metadata:
+  name: s2i-deploy-git-html
+spec:
+  params:
+    - name: gitRepo
+      type: string
+      description: |
+        The url of the public git repo to clone containing the HTML website
+    - name: gitAppDir
+      type: string
+      default: "./"
+      description: |
+        The directory within the gitRepo to use as a context-dir which contains the HTML site
+    - name: appName
+      type: string
+      description: |
+        The name of the site to deploy
+    - name: appEnv
+      type: string
+      default: ""
+      description: |
+        The application environment to set on the app (only relevant on initial build).  Must be in KEY1=value1,KEY2=value2 format.
+  steps:
+    - name: s2i-deploy-git-docker
+      image: registry.redhat.io/openshift4/ose-cli@sha256:0d21299d2adfa3cb74562c4dffbedd3b107fffac3a2a537f14770088abd4671f
+      script: |
+        #!/usr/bin/env bash
+        set -e
+
+        echo "installing git..."
+        yum install -y git
+
+        echo "setting subcommand string..."
+        SUB_STRING=""
+        if [ -z `oc get pods --no-headers -l deployment=$(params.appName) -o name` ]; then
+          echo "deploying app for first time '$(params.appName)'..."
+
+          ENV_STRING=""
+          if [ -n "$(params.appEnv)" ]; then
+            echo "setting env string..."
+            for PAIR in `echo $(params.appEnv) | tr ',' '\n'`; do
+              KEY=`echo $PAIR | awk -F'=' '{print $1}'`
+              VALUE=`echo $PAIR | awk -F'=' '{print $NF}'`
+
+              ENV_STRING+="--env=$KEY=$VALUE "
+            done
+
+            echo "using env string $ENV_STRING"
+          fi
+
+          echo "creating service account '$(params.appName)'..."
+          oc create serviceaccount $(params.appName)
+
+          echo "deploying app '$(params.appName)'"
+          oc new-app $ENV_STRING \
+            --name=$(params.appName) \
+            --strategy=docker \
+            --context-dir=$(params.gitAppDir) \
+            $(params.gitRepo)
+
+          echo "update service account '$(params.appName)' for app '$(params.appName)'..."
+          oc set serviceaccount deployment $(params.appName) $(params.appName)
+
+          echo "exposing app '$(params.appName)'..."
+          oc expose svc/$(params.appName)
+        else
+          echo "deploying new revision of app '$(params.appName)'..."
+          oc start-build $(params.appName) -w
+        fi
+  stepTemplate:
+    securityContext:
+      runAsGroup: 0
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: html-cd
+  namespace: website-pipeline
+spec:
+  params:
+    - name: gitRepo
+      type: string
+      description: |
+        The url of the public git repo to clone containing the HTML website
+    - name: gitAppDir
+      type: string
+      default: "./"
+      description: |
+        The directory within the gitRepo to use as a context-dir which contains the HTML site
+    - name: appName
+      type: string
+      description: |
+        The name of the site to deploy
+    - name: appEnv
+      type: string
+      default: ""
+      description: |
+        The application environment to set on the app (only relevant on initial build).  Must be in KEY1=value1,KEY2=value2 format.
+  tasks:
+    #
+    # deploy
+    #
+    - name: deploy-s2i
+      params:
+        - name: gitRepo
+          value: "$(params.gitRepo)"
+        - name: gitAppDir
+          value: "$(params.gitAppDir)"
+        - name: appName
+          value: "$(params.appName)"
+        - name: appEnv
+          value: "$(params.appEnv)"
+      taskRef:
+        kind: ClusterTask
+        name: s2i-deploy-git-html
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: html-cd
+  namespace: website-pipeline
+spec:
+  params:
+    - name: gitRepo
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: html-cd-
+        namespace: website
+      spec:
+        pipelineRef:
+          name: html-cd
+        params:
+          - name: gitRepo
+            value: "$(tt.params.gitRepo)"
+          - name: gitAppDir
+            value: "io.dustinscott.apps.site1"
+          - name: appName
+            value: site1
+          - name: appEnv
+            value: "HELLO=world"
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: github
+  namespace: website-pipeline
+spec:
+  params:
+    - name: gitRepo
+      value: "$(body.repository.clone_url)"
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: EventListener
+metadata:
+  name: github
+  namespace: website-pipeline
+spec:
+  serviceAccountName: pipeline
+  triggers:
+    - name: html-cd
+      interceptors:
+        - ref:
+            name: github
+            kind: ClusterInterceptor
+            apiVersion: triggers.tekton.dev/v1alpha1
+      bindings:
+        - ref: github
+      template:
+        ref: html-cd
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: EventListener
+    app.kubernetes.io/part-of: Triggers
+    eventlistener: github
+  name: github
+  namespace: website-pipeline
+spec:
+  port:
+    targetPort: http-listener
+  tls:
+    termination: edge
+  to:
+    kind: Service
+    name: el-github

@@ -1,0 +1,20 @@
+apiVersion: operator.openshift.io/v1
+kind: IngressController
+metadata:
+  name: public
+  namespace: openshift-ingress-operator
+spec:
+  domain: apps.dustinscott.io
+  defaultCertificate:
+    name: public
+  clientTLS:
+    clientCA:
+      name: ""
+    clientCertificatePolicy: ""
+  httpCompression: {}
+  httpEmptyRequestsPolicy: Respond
+  httpErrorCodePages:
+    name: ""
+  replicas: 2
+  tuningOptions:
+    reloadInterval: 0s
