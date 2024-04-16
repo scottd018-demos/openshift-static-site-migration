@@ -11,11 +11,16 @@ spec:
       name: public
     solvers:
       - dns01:
-          acmeDNS:
-            host: https://auth.acme-dns.io
-            accountSecretRef:
-              name: acme-dns
-              key: register.json
+          azureDNS:
+            clientID: AZURE_CERT_MANAGER_SP_APP_ID
+            clientSecretSecretRef:
+              name: azure-dns
+              key: client-secret
+            subscriptionID: AZURE_SUBSCRIPTION_ID
+            tenantID: AZURE_TENANT_ID
+            resourceGroupName: AZURE_DNS_ZONE_RESOURCE_GROUP
+            hostedZoneName: AZURE_DNS_ZONE
+            environment: AzurePublicCloud
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -27,6 +32,6 @@ spec:
   issuerRef:
     name: public
     kind: ClusterIssuer
-  commonName: "*.apps.dustinscott.io"
+  commonName: "*.apps.azure.dustinscott.io"
   dnsNames:
-    - "*.apps.dustinscott.io"
+    - "*.apps.azure.dustinscott.io"

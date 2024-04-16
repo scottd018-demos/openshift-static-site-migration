@@ -34,13 +34,86 @@ certificates to front the website
 
 ### Cluster Admins
 
+
+#### Setup 
+
 1. First, we must ensure that we have all of the appropriate operators installed:
 
 ```bash
 make operators
 ```
 
-1. Next, if one does not already exist, we must create an ingress controller that is tied to our public domain:
+2. There is also a cert-manager project that allows us to easily inject certificates into our OpenShift routes
+that should be considered and is used for this walkthrough (https://github.com/cert-manager/openshift-routes):
+
+```bash
+make cert-manager-route
+```
+
+
+#### Create Public Certificate Issuer
+
+> **NOTE:** the below is for ease of walkthrough.  Be sure to use your appropriate DNS provider to meet challenge 
+> requirements if you need to.  Full walkthroughs are at https://cert-manager.io/docs/configuration/acme/dns01/.
+
+1. First, we need to ensure that our domain in Azure DNS is publicly available.  From any client, you can check 
+this with:
+
+```bash
+nslookup test.example.com
+```
+
+For me, I injected a record named `test` so that I can test resolution.  It is delegated from my top-level domain.
+
+![Azure Domain](images/azure-dns.png)
+
+And I can resolve it appropriately:
+
+```bash
+nslookup test.azure.dustinscott.io 8.8.8.8
+Server:         8.8.8.8
+Address:        8.8.8.8#53
+
+Non-authoritative answer:
+Name:   test.azure.dustinscott.io
+Address: 10.10.10.10
+```
+
+2. Next, we need to register a domain so that we have the ability to request public certificates from an ACME server.  
+This can be done one of MANY ways, but the purposes of this walkthrough, we are going to us AzureDNS.  If you have a 
+domain such as Route53, feel free to skip this step, but understand you will need to 
+configure your issuer appropriately (see `kubernetes/public-issuer.yaml`).
+
+To begin this process, we first need to create a service principal which has access to update your Azure DNS zone.  The 
+service principal credentials are stored at `azure-sp.json` (but they are not checked into git):
+
+> **NOTE:** there are other ways to inject credentials such as managed identity.  I am doing this on an [Azure Red Hat OpenShift](https://azure.microsoft.com/en-us/products/openshift)
+> cluster which does not yet support managed identity as of this writing. Feel free to select a different method if you 
+> prefer but understand the steps in this walkthrough will change.  See 
+> https://cert-manager.io/docs/configuration/acme/dns01/azuredns/#service-principal for more details. 
+
+```bash
+make azure-sp
+```
+
+1. Next, we need to create a secret containing the service principal password from the previous step:
+
+```bash
+make azure-secret
+```
+
+1. Using the service principal attributes, we will create a `ClusterIssuer` resource and a wild card certificate for 
+our apps domain.  The `ClusterIssuer` is used to generate public certs for our domain, but it must be validated, so 
+cert-manager needs to update the zone appropriately to validate:
+
+```bash
+make public-issuer
+```
+
+
+#### Create Public Ingress Controller
+
+1. Next, we must create an ingress controller that is tied to our public domain and uses the certificate from above by default:
 
 ```bash
 DOMAIN=example.com make ingress-controller
@@ -76,37 +149,3 @@ nslookup fake.example.com
 # Address: 40.10.10.10
 ```
 
-> **NOTE:** the below is for ease of walkthrough.  Be sure to use with caution if using for anything but a walkthrough.
-
-1. Next, we need to register a domain so that we have the ability to request public certificates from an ACME server.  
-This can be done one of MANY ways.  We are going to assume no API is used, so we will manually register a domain with 
-ACME DNS.  If you have a domain such as Route53/AzureDNS, feel free to skip this step, but understand you will need to 
-configure your issuer appropriately (see `kubernetes/public-issuer.yaml`).
-
-```bash
-make register-domain
-```
-
-The DNS record from the above command needs to be registered as a CNAME in your DNS server to point from 
-`_acme-challenge.example.com` back to the output of `fulldomain`, assuming `example.com` is your domain.  You can get 
-this record that you must insert by:
-
-```bash
-make register-cname
-
-# output sample:
-# <GUID>.auth.acme-dns.io
-```
-
-Once you have created the above record as a CNAME for `_acme-challenge.example.com`, we need to create the registration 
-JSON as a secret in your cluster.
-
-```bash
-make register-secret
-```
-
-Finally, you can register the domain by creating the ClusterIssuer for your public domain and a wildcard certificate.
-
-```bash
-make public-issuer
-```

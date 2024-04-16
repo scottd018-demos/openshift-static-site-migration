@@ -1,4 +1,9 @@
 ---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: website-pipeline
+---
 apiVersion: tekton.dev/v1beta1
 kind: ClusterTask
 metadata:
@@ -9,20 +14,27 @@ spec:
       type: string
       description: |
         The url of the public git repo to clone containing the HTML website
-    - name: gitAppDir
+    - name: gitSiteDir
       type: string
       default: "./"
       description: |
         The directory within the gitRepo to use as a context-dir which contains the HTML site
-    - name: appName
+    - name: siteName
       type: string
       description: |
         The name of the site to deploy
-    - name: appEnv
+    - name: siteDomain
       type: string
-      default: ""
       description: |
-        The application environment to set on the app (only relevant on initial build).  Must be in KEY1=value1,KEY2=value2 format.
+        The domain which the site is deployed to 
+    - name: siteNamespace
+      type: string
+      description: |
+        The namespace where the site containers lives for the site to deploy
+    - name: siteHostname
+      type: string
+      description: |
+        The hostname of the site to deploy
   steps:
     - name: s2i-deploy-git-docker
       image: registry.redhat.io/openshift4/ose-cli@sha256:0d21299d2adfa3cb74562c4dffbedd3b107fffac3a2a537f14770088abd4671f
@@ -33,42 +45,60 @@ spec:
         echo "installing git..."
         yum install -y git
 
-        echo "setting subcommand string..."
-        SUB_STRING=""
-        if [ -z `oc get pods --no-headers -l deployment=$(params.appName) -o name` ]; then
-          echo "deploying app for first time '$(params.appName)'..."
+        echo "debugging..."
+        echo "gitRepo:       $(params.gitRepo)"
+        echo "gitSiteDir:    $(params.gitSiteDir)"
+        echo "siteName:      $(params.siteName)"
+        echo "siteDomain:    $(params.siteDomain)"
+        echo "siteNamespace: $(params.siteNamespace)"
+        echo "siteHostname:  $(params.siteHostname)"
 
-          ENV_STRING=""
-          if [ -n "$(params.appEnv)" ]; then
-            echo "setting env string..."
-            for PAIR in `echo $(params.appEnv) | tr ',' '\n'`; do
-              KEY=`echo $PAIR | awk -F'=' '{print $1}'`
-              VALUE=`echo $PAIR | awk -F'=' '{print $NF}'`
+        exit 0
 
-              ENV_STRING+="--env=$KEY=$VALUE "
-            done
+        echo "using namespace '$(params.siteNamespace)'..."
+        oc project $(params.siteNamespace)
 
-            echo "using env string $ENV_STRING"
-          fi
+        if [ -z `oc get pods --no-headers -l deployment=$(params.siteName) -o name` ]; then
+          echo "deploying site for first time '$(params.siteName)'..."
 
-          echo "creating service account '$(params.appName)'..."
-          oc create serviceaccount $(params.appName)
+          echo "creating service account '$(params.siteName)'..."
+          oc create serviceaccount $(params.siteName)
 
-          echo "deploying app '$(params.appName)'"
-          oc new-app $ENV_STRING \
-            --name=$(params.appName) \
-            --strategy=docker \
-            --context-dir=$(params.gitAppDir) \
-            $(params.gitRepo)
+          echo "deploying site '$(params.siteName)'"
+          oc new-app nginx:1.20-ubi9~$(params.gitRepo) \
+            --name=$(params.siteName) \
+            --context-dir=$(params.gitSiteDir)
 
-          echo "update service account '$(params.appName)' for app '$(params.appName)'..."
-          oc set serviceaccount deployment $(params.appName) $(params.appName)
+          echo "update service account '$(params.siteName)' for app '$(params.siteName)'..."
+          oc set serviceaccount deployment $(params.siteName) $(params.siteName)
 
-          echo "exposing app '$(params.appName)'..."
-          oc expose svc/$(params.appName)
+          echo "exposing app '$(params.siteName)' using hostname '$(params.siteHostname)'..."
+          #oc expose svc/$(params.siteName) --hostname=$(params.siteHostname)
+          cat <<EOF | oc create -f -
+          apiVersion: route.openshift.io/v1
+          kind: Route
+          metadata:
+            name: $(params.siteName)
+            annotations:
+              cert-manager.io/issuer-name: public
+              cert-manager.io/issuer-kind: ClusterIssuer
+          spec:
+            host: $(params.siteHostname)
+            port:
+              targetPort: 8080-tcp
+            to:
+              kind: Service
+              name: $(params.siteName)
+              weight: 100
+            tls:
+              termination: edge
+              insecureEdgeTerminationPolicy: Redirect
+            wildcardPolicy: None
+        EOF
+
         else
-          echo "deploying new revision of app '$(params.appName)'..."
-          oc start-build $(params.appName) -w
+          echo "deploying new revision of app '$(params.siteName)'..."
+          oc start-build $(params.siteName) -w
         fi
   stepTemplate:
     securityContext:
@@ -85,20 +115,23 @@ spec:
       type: string
       description: |
         The url of the public git repo to clone containing the HTML website
-    - name: gitAppDir
+    - name: gitSiteDir
       type: string
       default: "./"
       description: |
         The directory within the gitRepo to use as a context-dir which contains the HTML site
-    - name: appName
+    - name: siteName
       type: string
       description: |
         The name of the site to deploy
-    - name: appEnv
+    - name: siteNamespace
       type: string
-      default: ""
       description: |
-        The application environment to set on the app (only relevant on initial build).  Must be in KEY1=value1,KEY2=value2 format.
+        The namespace where the site containers lives for the site to deploy
+    - name: siteHostname
+      type: string
+      description: |
+        The hostname of the site to deploy
   tasks:
     #
     # deploy
@@ -107,12 +140,14 @@ spec:
       params:
         - name: gitRepo
           value: "$(params.gitRepo)"
-        - name: gitAppDir
-          value: "$(params.gitAppDir)"
-        - name: appName
-          value: "$(params.appName)"
-        - name: appEnv
-          value: "$(params.appEnv)"
+        - name: gitSiteDir
+          value: "$(params.gitSiteDir)"
+        - name: siteName
+          value: "$(params.siteName)"
+        - name: siteNamespace
+          value: "$(params.siteNamespace)"
+        - name: siteHostname
+          value: "$(params.siteHostname)"
       taskRef:
         kind: ClusterTask
         name: s2i-deploy-git-html
@@ -125,6 +160,10 @@ metadata:
 spec:
   params:
     - name: gitRepo
+    - name: gitSiteDir
+    - name: siteName
+    - name: siteNamespace
+    - name: siteHostname
   resourcetemplates:
     - apiVersion: tekton.dev/v1beta1
       kind: PipelineRun
@@ -137,12 +176,14 @@ spec:
         params:
           - name: gitRepo
             value: "$(tt.params.gitRepo)"
-          - name: gitAppDir
-            value: "io.dustinscott.apps.site1"
-          - name: appName
-            value: site1
-          - name: appEnv
-            value: "HELLO=world"
+          - name: gitSiteDir
+            value: "$(tt.params.gitSiteDir)"
+          - name: siteName
+            value: "$(tt.params.siteName)"
+          - name: siteNamespace
+            value: "$(tt.params.siteNamespace)"
+          - name: siteHostname
+            value: "$(tt.params.siteHostname)"
 ---
 apiVersion: triggers.tekton.dev/v1alpha1
 kind: TriggerBinding
@@ -153,6 +194,14 @@ spec:
   params:
     - name: gitRepo
       value: "$(body.repository.clone_url)"
+    - name: gitSiteDir
+      value: "io.dustinscott.apps.site1"
+    - name: siteName
+      value: "site1"
+    - name: siteNamespace
+      value: "site1"
+    - name: siteHostname
+      value: "site1.apps.dustinscott.io"
 ---
 apiVersion: triggers.tekton.dev/v1alpha1
 kind: EventListener
@@ -180,9 +229,13 @@ metadata:
     app.kubernetes.io/managed-by: EventListener
     app.kubernetes.io/part-of: Triggers
     eventlistener: github
+  annotations:
+    cert-manager.io/issuer-name: public
+    cert-manager.io/issuer-kind: ClusterIssuer
   name: github
   namespace: website-pipeline
 spec:
+  host: github.apps.azure.dustinscott.io
   port:
     targetPort: http-listener
   tls:
