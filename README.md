@@ -226,4 +226,7 @@ git push
 
 * View the Changes
 
-You 
+![Site Update](images/site1-change.png)
+
+
+* Profit....
