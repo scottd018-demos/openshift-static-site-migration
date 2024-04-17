@@ -4,6 +4,33 @@ kind: Namespace
 metadata:
   name: website-pipeline
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipeline-privileged
+  namespace: website-pipeline
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:privileged
+subjects:
+  - kind: ServiceAccount
+    name: pipeline
+    namespace: website-pipeline
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pipeline-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: pipeline
+    namespace: website-pipeline
+---
 apiVersion: tekton.dev/v1beta1
 kind: ClusterTask
 metadata:
@@ -169,7 +196,7 @@ spec:
       kind: PipelineRun
       metadata:
         generateName: html-cd-
-        namespace: website
+        namespace: website-pipeline
       spec:
         pipelineRef:
           name: html-cd
