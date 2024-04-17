@@ -74,8 +74,7 @@ spec:
         echo "siteName:      $(params.siteName)"
         echo "siteNamespace: $(params.siteNamespace)"
         echo "siteHostname:  $(params.siteHostname)"
-
-        exit 0
+        echo
 
         echo "using namespace '$(params.siteNamespace)'..."
         oc project $(params.siteNamespace)
