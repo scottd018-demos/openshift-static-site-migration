@@ -1,3 +1,4 @@
 register.json
 azure-sp.json
-kubeconfig
+kubeconfig*
+aro.htpasswd
