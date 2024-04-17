@@ -13,7 +13,7 @@ the following:
 This walkthrough makes use of 2 personas:
 
 1. Cluster Admin - responsible for platform setup and configuration as well as external configuration such as DNS.  
-In this walkthrough, the relevant examples are:
+In this walkthrough, the relevant examples of cluster-admin responsibility (either indirect or direct responsibility) are:
 
 * Operators such as cert-manager
 * Ingress for the public domain
@@ -149,3 +149,19 @@ nslookup fake.example.com
 # Address: 40.10.10.10
 ```
 
+
+#### Create Pipelines
+
+The pipelines are used to deliver website updates as the changes are checked into git.  You can install them as simply as:
+
+```bash
+make pipelines
+```
+
+Once installed, you will need to add a GitHub webhook to point at the listener.  This will send an event to the cluster 
+each time a new change is detected in your GitHub site repo.  You need to use the following URL in your GitHub webhook
+configuration (replacing MY_DOMAIN with your domain that your public ingresscontroller is serving):
+
+```bash
+https://github.${MY_DOMAIN}
+```

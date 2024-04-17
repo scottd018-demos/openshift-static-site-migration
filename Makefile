@@ -42,3 +42,9 @@ ingress-controller:
 
 public-ip:
 	@oc get svc -n openshift-ingress router-public -o json | jq -r '.status.loadBalancer.ingress[0].ip'
+
+#
+# pipelines
+#
+pipelines:
+	oc apply -f kubernetes/pipelines.yaml
