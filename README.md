@@ -107,7 +107,7 @@ make azure-sp
 make azure-secret
 ```
 
-1. Using the service principal attributes, we will create a `ClusterIssuer` resource and a wild card certificate for 
+2. Using the service principal attributes, we will create a `ClusterIssuer` resource and a wild card certificate for 
 our apps domain.  The `ClusterIssuer` is used to generate public certs for our domain, but it must be validated, so 
 cert-manager needs to update the zone appropriately to validate:
 
@@ -124,7 +124,7 @@ make public-issuer
 DOMAIN=example.com make ingress-controller
 ```
 
-1. Next, if one does not already exist, we must create a DNS record for the public domain that is tied back 
+2. Next, if one does not already exist, we must create a DNS record for the public domain that is tied back 
 to the ingress controller that we just created:
 
 ```bash
@@ -188,20 +188,20 @@ push to GitHub, and kickoff a deployment pipeline.
 PASSWORD=<my-password> make developer
 ```
 
-1. Login to the OpenShift cluster as the developer user:
+2. Login to the OpenShift cluster as the developer user:
 
 ```bash
 make developer-login
 ```
 
-1. Create the projects which will host each individual site.  For this walkthrough, we are assuming the use of 
+3. Create the projects which will host each individual site.  For this walkthrough, we are assuming the use of 
 one project per site.
 
 ```bash
 make projects
 ```
 
-1. Make a configuration change to any of this website and push changes to the repo.  You will see the pipeline 
+4. Make a configuration change to any of this website and push changes to the repo.  You will see the pipeline 
 kick off and you can view logs and view your changes at the posted URL.  Each time you make a change, a new 
 revision of the site is deployed.
 
