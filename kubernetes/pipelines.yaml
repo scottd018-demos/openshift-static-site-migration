@@ -5,6 +5,64 @@ metadata:
   name: website-pipeline
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pipeline-viewer
+rules:
+  - apiGroups:
+      - tekton.dev
+    resources:
+      - "*"
+    verbs:
+      - "get"
+      - "list"
+      - "watch"
+  - apiGroups:
+      - ""
+    resources:
+      - "pods"
+    verbs:
+      - "list"
+      - "get"
+  - apiGroups:
+      - ""
+    resources:
+      - "pods/log"
+    verbs:
+      - "get"
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+    resourceNames:
+      - "website-pipeline"
+  - apiGroups:
+      - ""
+      - "project.openshift.io"
+    resources:
+      - projects
+    verbs:
+      - get
+    resourceNames:
+      - "website-pipeline"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipeline-viewer
+  namespace: website-pipeline
+subjects:
+  - kind: User
+    name: developer
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: pipeline-viewer
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: pipeline-privileged
@@ -125,6 +183,100 @@ spec:
     securityContext:
       runAsGroup: 0
 ---
+apiVersion: tekton.dev/v1beta1
+kind: ClusterTask
+metadata:
+  name: s2i-deploy-git-php
+spec:
+  params:
+    - name: gitRepo
+      type: string
+      description: |
+        The url of the public git repo to clone containing the PHP website
+    - name: gitSiteDir
+      type: string
+      default: "./"
+      description: |
+        The directory within the gitRepo to use as a context-dir which contains the PHP site
+    - name: siteName
+      type: string
+      description: |
+        The name of the site to deploy
+    - name: siteNamespace
+      type: string
+      description: |
+        The namespace where the site containers lives for the site to deploy
+    - name: siteHostname
+      type: string
+      description: |
+        The hostname of the site to deploy
+  steps:
+    - name: s2i-deploy-git-php
+      image: registry.redhat.io/openshift4/ose-cli@sha256:0d21299d2adfa3cb74562c4dffbedd3b107fffac3a2a537f14770088abd4671f
+      script: |
+        #!/usr/bin/env bash
+        set -e
+
+        echo "installing git..."
+        yum install -y git
+
+        echo "debugging..."
+        echo "gitRepo:       $(params.gitRepo)"
+        echo "gitSiteDir:    $(params.gitSiteDir)"
+        echo "siteName:      $(params.siteName)"
+        echo "siteNamespace: $(params.siteNamespace)"
+        echo "siteHostname:  $(params.siteHostname)"
+        echo
+
+        echo "using namespace '$(params.siteNamespace)'..."
+        oc project $(params.siteNamespace)
+
+        if [ -z `oc get pods --no-headers -l deployment=$(params.siteName) -o name` ]; then
+          echo "deploying site for first time '$(params.siteName)'..."
+
+          echo "creating service account '$(params.siteName)'..."
+          oc create serviceaccount $(params.siteName)
+
+          echo "deploying site '$(params.siteName)'"
+          oc new-app php:8.0-ubi9~$(params.gitRepo) \
+            --name=$(params.siteName) \
+            --context-dir=$(params.gitSiteDir)
+
+          echo "update service account '$(params.siteName)' for app '$(params.siteName)'..."
+          oc set serviceaccount deployment $(params.siteName) $(params.siteName)
+
+          echo "exposing app '$(params.siteName)' using hostname '$(params.siteHostname)'..."
+          #oc expose svc/$(params.siteName) --hostname=$(params.siteHostname)
+          cat <<EOF | oc create -f -
+          apiVersion: route.openshift.io/v1
+          kind: Route
+          metadata:
+            name: $(params.siteName)
+            annotations:
+              cert-manager.io/issuer-name: public
+              cert-manager.io/issuer-kind: ClusterIssuer
+          spec:
+            host: $(params.siteHostname)
+            port:
+              targetPort: 8080-tcp
+            to:
+              kind: Service
+              name: $(params.siteName)
+              weight: 100
+            tls:
+              termination: edge
+              insecureEdgeTerminationPolicy: Redirect
+            wildcardPolicy: None
+        EOF
+
+        else
+          echo "deploying new revision of app '$(params.siteName)'..."
+          oc start-build $(params.siteName) -w
+        fi
+  stepTemplate:
+    securityContext:
+      runAsGroup: 0
+---
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
@@ -157,7 +309,7 @@ spec:
     #
     # deploy
     #
-    - name: deploy-s2i
+    - name: s2i-deploy-git-html
       params:
         - name: gitRepo
           value: "$(params.gitRepo)"
@@ -172,6 +324,54 @@ spec:
       taskRef:
         kind: ClusterTask
         name: s2i-deploy-git-html
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: php-cd
+  namespace: website-pipeline
+spec:
+  params:
+    - name: gitRepo
+      type: string
+      description: |
+        The url of the public git repo to clone containing the PHP website
+    - name: gitSiteDir
+      type: string
+      default: "./"
+      description: |
+        The directory within the gitRepo to use as a context-dir which contains the PHP site
+    - name: siteName
+      type: string
+      description: |
+        The name of the site to deploy
+    - name: siteNamespace
+      type: string
+      description: |
+        The namespace where the site containers lives for the site to deploy
+    - name: siteHostname
+      type: string
+      description: |
+        The hostname of the site to deploy
+  tasks:
+    #
+    # deploy
+    #
+    - name: s2i-deploy-git-php
+      params:
+        - name: gitRepo
+          value: "$(params.gitRepo)"
+        - name: gitSiteDir
+          value: "$(params.gitSiteDir)"
+        - name: siteName
+          value: "$(params.siteName)"
+        - name: siteNamespace
+          value: "$(params.siteNamespace)"
+        - name: siteHostname
+          value: "$(params.siteHostname)"
+      taskRef:
+        kind: ClusterTask
+        name: s2i-deploy-git-php
 ---
 apiVersion: triggers.tekton.dev/v1alpha1
 kind: TriggerTemplate
@@ -207,6 +407,39 @@ spec:
             value: "$(tt.params.siteHostname)"
 ---
 apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: php-cd
+  namespace: website-pipeline
+spec:
+  params:
+    - name: gitRepo
+    - name: gitSiteDir
+    - name: siteName
+    - name: siteNamespace
+    - name: siteHostname
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: php-cd-
+        namespace: website-pipeline
+      spec:
+        pipelineRef:
+          name: php-cd
+        params:
+          - name: gitRepo
+            value: "$(tt.params.gitRepo)"
+          - name: gitSiteDir
+            value: "$(tt.params.gitSiteDir)"
+          - name: siteName
+            value: "$(tt.params.siteName)"
+          - name: siteNamespace
+            value: "$(tt.params.siteNamespace)"
+          - name: siteHostname
+            value: "$(tt.params.siteHostname)"
+---
+apiVersion: triggers.tekton.dev/v1alpha1
 kind: TriggerBinding
 metadata:
   name: site1
@@ -221,6 +454,22 @@ spec:
       value: "site1"
     - name: siteHostname
       value: "site1.apps.azure.dustinscott.io"
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: site2
+  namespace: website-pipeline
+spec:
+  params:
+    - name: gitSiteDir
+      value: "io.dustinscott.azure.apps.site2"
+    - name: siteName
+      value: "site2"
+    - name: siteNamespace
+      value: "site2"
+    - name: siteHostname
+      value: "site2.apps.azure.dustinscott.io"
 ---
 apiVersion: triggers.tekton.dev/v1alpha1
 kind: TriggerBinding
@@ -240,6 +489,9 @@ metadata:
 spec:
   serviceAccountName: pipeline
   triggers:
+    #
+    # site 1: html
+    #
     - name: site1
       interceptors:
         - ref:
@@ -256,6 +508,26 @@ spec:
         - ref: site1
       template:
         ref: html-cd
+
+    #
+    # site 2: php
+    #
+    - name: site2
+      interceptors:
+        - ref:
+            name: "cel"
+          params:
+            - name: "filter"
+              value: "body.repository.clone_url == 'https://github.com/scottd018-demos/openshift-static-site-migration.git'"
+        - ref:
+            name: github
+            kind: ClusterInterceptor
+            apiVersion: triggers.tekton.dev/v1alpha1
+      bindings:
+        - ref: github
+        - ref: site2
+      template:
+        ref: php-cd
 ---
 apiVersion: route.openshift.io/v1
 kind: Route

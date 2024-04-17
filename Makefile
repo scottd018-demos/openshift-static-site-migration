@@ -48,3 +48,21 @@ public-ip:
 #
 pipelines:
 	oc apply -f kubernetes/pipelines.yaml
+
+event-listener-url:
+
+#
+# developer
+#
+PASSWORD ?=
+developer:
+	htpasswd -c -B -b htpasswd developer-user '$(PASSWORD)'
+	oc create secret generic developer-user --from-file=htpasswd=./htpasswd -n openshift-config
+	oc apply -f kubernetes/developer.yaml
+
+developer-login:
+	oc login -u developer-user
+
+projects:
+	oc new-project site1
+	oc new-project site2

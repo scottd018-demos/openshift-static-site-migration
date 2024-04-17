@@ -1,11 +1,15 @@
 # Summary
 
-This repo shows a simple modern workflow for a traditional HTML website serving static content.  It includes 
+This repo shows a simple modern workflow for a traditional HTML website running on OpenShift serving static content.  It includes 
 the following:
 
 1. A pipeline to deploy the latest content (using [OpenShift Pipelines](https://docs.openshift.com/pipelines/1.14/about/understanding-openshift-pipelines.html))
 2. A [source-to-image](https://docs.openshift.com/container-platform/4.14/openshift_images/using_images/using-s21-images.html) process to deliver the content as a container
 3. An automated certificate rotation using [public certificates with cert-manager](https://docs.openshift.com/container-platform/4.14/security/cert_manager_operator/cert-manager-operator-issuer-acme.html)
+
+> **WARN:** I have not put a ton of validation into this walkthrough.  If you want a positive outcome, I would suggest 
+> following it step-by-step unless you know what you are doing.  This was tested against lightly used clusters and 
+> precautions should be taken against clusters which are used for real purposes.  Issues and PRs welcome!
 
 
 ## Personas
@@ -19,6 +23,7 @@ In this walkthrough, the relevant examples of cluster-admin responsibility (eith
 * Ingress for the public domain
 * Certificate Issuer configuration for requesting public certificates
 * Re-usable pipeline resources
+* RBAC for developer users to allow management of pipelines
 
 1. Developer - responsible for submitting website code into a git repo and monitoring pipelines upon updates
 
@@ -165,3 +170,60 @@ configuration (replacing MY_DOMAIN with your domain that your public ingresscont
 ```bash
 https://github.${MY_DOMAIN}
 ```
+
+You can do this by navigating to your GitHub repo, under `Settings > Webhooks` and adding the above URL as a webhook.  This 
+allows GitHub to POST an event to the above listener each time a change is detected in the repo.  There are far more 
+complicated configurations than this, but for simplicity, this assumes that each change is going to kickoff a 
+pipeline run to deploy the new changes in the cluster:
+
+![GitHub Webhook](images/github-webhook.png)
+
+
+#### Create Developer User
+
+1. Create the developer user which will be used to show a developer that is able to write their website code, 
+push to GitHub, and kickoff a deployment pipeline.
+
+```bash
+PASSWORD=<my-password> make developer
+```
+
+1. Login to the OpenShift cluster as the developer user:
+
+```bash
+make developer-login
+```
+
+1. Create the projects which will host each individual site.  For this walkthrough, we are assuming the use of 
+one project per site.
+
+```bash
+make projects
+```
+
+1. Make a configuration change to any of this website and push changes to the repo.  You will see the pipeline 
+kick off and you can view logs and view your changes at the posted URL.  Each time you make a change, a new 
+revision of the site is deployed.
+
+* Navigate to `Pipelines > PipelineRuns > Logs` in the `website-pipeline` project to view the run:
+
+![PipelineRun](images/pipeline-run.png)
+
+* View the Web Site 
+
+![Site](images/site1.png)
+
+* Observe the Secure Certificate
+
+![Certificate](images/cert.png)
+
+* Make a Change
+
+```bash
+git commit -a -m "feat: my change"
+git push
+```
+
+* View the Changes
+
+You 
