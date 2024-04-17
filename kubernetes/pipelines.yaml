@@ -50,10 +50,6 @@ spec:
       type: string
       description: |
         The name of the site to deploy
-    - name: siteDomain
-      type: string
-      description: |
-        The domain which the site is deployed to 
     - name: siteNamespace
       type: string
       description: |
@@ -76,7 +72,6 @@ spec:
         echo "gitRepo:       $(params.gitRepo)"
         echo "gitSiteDir:    $(params.gitSiteDir)"
         echo "siteName:      $(params.siteName)"
-        echo "siteDomain:    $(params.siteDomain)"
         echo "siteNamespace: $(params.siteNamespace)"
         echo "siteHostname:  $(params.siteHostname)"
 
