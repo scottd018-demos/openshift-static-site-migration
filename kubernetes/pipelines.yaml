@@ -210,20 +210,28 @@ spec:
 apiVersion: triggers.tekton.dev/v1alpha1
 kind: TriggerBinding
 metadata:
+  name: site1
+  namespace: website-pipeline
+spec:
+  params:
+    - name: gitSiteDir
+      value: "io.dustinscott.azure.apps.site1"
+    - name: siteName
+      value: "site1"
+    - name: siteNamespace
+      value: "site1"
+    - name: siteHostname
+      value: "site1.apps.azure.dustinscott.io"
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
   name: github
   namespace: website-pipeline
 spec:
   params:
     - name: gitRepo
       value: "$(body.repository.clone_url)"
-    - name: gitSiteDir
-      value: "io.dustinscott.apps.site1"
-    - name: siteName
-      value: "$(body.siteName)"
-    - name: siteNamespace
-      value: "site1"
-    - name: siteHostname
-      value: "site1.apps.dustinscott.io"
 ---
 apiVersion: triggers.tekton.dev/v1alpha1
 kind: EventListener
@@ -233,14 +241,20 @@ metadata:
 spec:
   serviceAccountName: pipeline
   triggers:
-    - name: html-cd
+    - name: site1
       interceptors:
+        - ref:
+            name: "cel"
+          params:
+            - name: "filter"
+              value: "body.repository.clone_url == 'https://github.com/scottd018-demos/openshift-static-site-migration.git'"
         - ref:
             name: github
             kind: ClusterInterceptor
             apiVersion: triggers.tekton.dev/v1alpha1
       bindings:
         - ref: github
+        - ref: site1
       template:
         ref: html-cd
 ---
